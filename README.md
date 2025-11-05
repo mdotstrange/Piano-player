@@ -6,7 +6,7 @@
 
 ## 🖥 Демо
 
-🔗 [Открыть приложение](https://noname27cloud.github.io/piaano/)
+🔗 [Открыть приложение](https://noname27cloud.github.io/Piano-player/)
 
 ## Project Description
 
