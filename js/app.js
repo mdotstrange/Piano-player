@@ -8,7 +8,7 @@ const pianoKeys = document.querySelectorAll(".key");
 
 const recordButton = document.getElementById("recordBtn");
 const stopRecordButton = document.getElementById("stopRecordingBtn");
-const downloadBtn = document.getElementById("downloadBtn");
+const playbackBtn = document.getElementById("playbackBtn");
 
 const pressedKeys = new Set();
 const player = new AudioPlayer();
@@ -20,10 +20,14 @@ let startTime = 0;
 let recordedNotes = [];
 let recordInterval;
 let isTouchDevice = false;
+let isPlayingRecording = false;
+let playbackRecordingIndex = 0;
+let playbackRecordingTimeout;
+const MAX_RECORDING_TIME = 30;
 
-downloadBtn.disabled = true;
-downloadBtn.style.opacity = "0.5";
-downloadBtn.style.cursor = "not-allowed";
+playbackBtn.disabled = true;
+playbackBtn.style.opacity = "0.5";
+playbackBtn.style.cursor = "not-allowed";
 
 const keyToNoteMap = {
   q: "C3",
@@ -103,10 +107,10 @@ function resetMode() {
     stopRecordButton.disabled = false;
     stopRecordButton.style.opacity = "1";
 
-    downloadBtn.disabled = true;
-    downloadBtn.style.opacity = "0.5";
-    downloadBtn.classList.remove("active");
-    downloadBtn.style.cursor = "not-allowed";
+    playbackBtn.disabled = true;
+    playbackBtn.style.opacity = "0.5";
+    playbackBtn.classList.remove("active");
+    playbackBtn.style.cursor = "not-allowed";
 
     pressedKeys.clear();
     pianoKeys.forEach((key) => key.classList.remove("active"));
@@ -210,7 +214,7 @@ function handleMousePress(event, isPressed) {
 // Recording functions
 recordButton.addEventListener("click", startRecording);
 stopRecordButton.addEventListener("click", stopRecording);
-downloadBtn.addEventListener("click", downloadRecording);
+playbackBtn.addEventListener("click", togglePlaybackRecording);
 
 function startRecording() {
   if (isRecording) return;
@@ -219,16 +223,16 @@ function startRecording() {
   recordedNotes = [];
   startTime = performance.now();
 
-  recordButton.textContent = "🔴 0:00";
+  recordButton.textContent = "🔴 0:30";
   recordButton.disabled = true;
   recordButton.style.opacity = "0.5";
   recordButton.classList.add("active");
   recordButton.style.cursor = "not-allowed";
 
-  downloadBtn.disabled = true;
-  downloadBtn.style.opacity = "0.5";
-  downloadBtn.classList.remove("active");
-  downloadBtn.style.cursor = "not-allowed";
+  playbackBtn.disabled = true;
+  playbackBtn.style.opacity = "0.5";
+  playbackBtn.classList.remove("active");
+  playbackBtn.style.cursor = "not-allowed";
 
   startRecordingTimer();
 }
@@ -246,30 +250,34 @@ function stopRecording() {
   recordButton.style.cursor = "pointer";
 
   if (recordedNotes.length > 0) {
-    downloadBtn.disabled = false;
-    downloadBtn.style.opacity = "1";
-    downloadBtn.style.cursor = "pointer";
+    playbackBtn.disabled = false;
+    playbackBtn.style.opacity = "1";
+    playbackBtn.style.cursor = "pointer";
   } else {
-    downloadBtn.disabled = true;
-    downloadBtn.style.opacity = "0.5";
-    downloadBtn.style.cursor = "not-allowed";
+    playbackBtn.disabled = true;
+    playbackBtn.style.opacity = "0.5";
+    playbackBtn.style.cursor = "not-allowed";
   }
 }
 
 function startRecordingTimer() {
-  let seconds = 0;
+  let secondsRemaining = MAX_RECORDING_TIME;
   let isDotVisible = true;
 
   recordInterval = setInterval(() => {
-    seconds++;
-    const minutes = Math.floor(seconds / 60);
-    const sec = seconds % 60;
+    secondsRemaining--;
+    const minutes = Math.floor(secondsRemaining / 60);
+    const sec = secondsRemaining % 60;
     const formattedTime = `${minutes}:${sec.toString().padStart(2, "0")}`;
 
     isDotVisible = !isDotVisible;
     recordButton.textContent = `${
       isDotVisible ? "🔴" : "⚪️"
     } ${formattedTime}`;
+
+    if (secondsRemaining <= 0) {
+      stopRecording();
+    }
   }, 1000);
 }
 
@@ -284,27 +292,70 @@ function updateNoteDuration(note) {
   }
 }
 
-// Download recording
-function downloadRecording() {
-  const recording = {
-    name: "My Song",
-    duration: recordedNotes.length
-      ? Math.max(...recordedNotes.map((n) => n.startTime + n.duration))
-      : 0,
-    notes: recordedNotes,
-  };
+// Playback recording functions
+function togglePlaybackRecording() {
+  if (isPlayingRecording) {
+    stopPlaybackRecording();
+  } else {
+    startPlaybackRecording();
+  }
+}
 
-  const blob = new Blob([JSON.stringify(recording, null, 2)], {
-    type: "application/json",
-  });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
+function startPlaybackRecording() {
+  if (recordedNotes.length === 0 || isRecording) return;
 
-  link.href = url;
-  link.download = `${recording.name}.json`;
-  link.click();
-  downloadBtn.classList.add("active");
-  downloadBtn.style.cursor = "pointer";
+  isPlayingRecording = true;
+  playbackRecordingIndex = 0;
+
+  recordButton.disabled = true;
+  recordButton.style.opacity = "0.5";
+  recordButton.style.cursor = "not-allowed";
+
+  playbackBtn.textContent = "Stop Playback";
+  playbackBtn.classList.add("active");
+
+  const playbackStartTime = performance.now();
+  scheduleNextRecordedNote(playbackStartTime);
+}
+
+function stopPlaybackRecording() {
+  isPlayingRecording = false;
+  playbackRecordingIndex = 0;
+  clearTimeout(playbackRecordingTimeout);
+
+  recordButton.disabled = false;
+  recordButton.style.opacity = "1";
+  recordButton.style.cursor = "pointer";
+
+  playbackBtn.textContent = "Playback Recording";
+  playbackBtn.classList.remove("active");
+
+  pianoKeys.forEach((key) => key.classList.remove("active"));
+}
+
+function scheduleNextRecordedNote(playbackStartTime) {
+  if (!isPlayingRecording || playbackRecordingIndex >= recordedNotes.length) {
+    stopPlaybackRecording();
+    return;
+  }
+
+  const currentNote = recordedNotes[playbackRecordingIndex];
+  const timeOffset = currentNote.startTime - (performance.now() - playbackStartTime);
+
+  playbackRecordingTimeout = setTimeout(() => {
+    playNoteFromRecording(currentNote);
+    playbackRecordingIndex++;
+    scheduleNextRecordedNote(playbackStartTime);
+  }, Math.max(timeOffset, 0));
+}
+
+function playNoteFromRecording(note) {
+  const keyElement = document.querySelector(`.key[data-note="${note.key}"]`);
+  if (keyElement) {
+    keyElement.classList.add("active");
+    setTimeout(() => keyElement.classList.remove("active"), note.duration);
+  }
+  player.playNote(note.key);
 }
 
 //Prepared Mode elements
